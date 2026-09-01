@@ -10,6 +10,7 @@ declare(strict_types=1);
 
 namespace Sportlog\FIT;
 
+use DateTime;
 use Exception;
 use InvalidArgumentException;
 use Psr\Log\LoggerInterface;
@@ -29,6 +30,16 @@ class Decoder
     const MESSAGE_TYPE_DATA = 'data';
     const MESSAGE_TYPE_DEFINITION = 'definition';
     const MESSAGE_TYPE_COMPRESSED_TIMESTAMP = 'compressed_timestamp';
+
+    /** FIT field definition number for the timestamp field. */
+    private const TIMESTAMP_FIELD_NUMBER = 253;
+
+    /**
+     * Last seen FIT timestamp (seconds since FIT epoch 1989-12-31).
+     * Updated by normal data messages and by each computed compressed timestamp.
+     * Used to reconstruct full timestamps from the 5-bit compressed-header offset.
+     */
+    private int $lastTimestamp = 0;
 
     /**
      * Ctor
@@ -109,7 +120,34 @@ class Decoder
 
             switch ($recordHeader['message_type']) {
                 case self::MESSAGE_TYPE_COMPRESSED_TIMESTAMP:
-                    throw new Exception('compressed timestamps are not implemented yet');
+                    // The timestamp is encoded in the record header rather than in the data stream.
+                    // Reconstruct the full timestamp from the last reference and the 5-bit offset,
+                    // adding 32 when the offset has wrapped past the 31-second boundary.
+                    if (!isset($messageTypeDefinitions[$localMessagType])) {
+                        throw new FitException("No message definition for local message type '{$localMessagType}' found.");
+                    }
+
+                    $offset = $recordHeader['time_offset'];
+                    $ts = ($this->lastTimestamp & 0xFFFFFFE0) | $offset;
+                    if ($ts < $this->lastTimestamp) {
+                        $ts += 32;
+                    }
+                    $this->lastTimestamp = $ts;
+
+                    $message = $this->nextRecordDataSkippingField(
+                        $messageTypeDefinitions[$localMessagType],
+                        self::TIMESTAMP_FIELD_NUMBER,
+                        $reader,
+                        $devMessages
+                    );
+                    $message->setFieldValue(self::TIMESTAMP_FIELD_NUMBER, $ts);
+
+                    $num = $message->getGlobalMessageNumber();
+                    if ($num === MesgNum::DEVELOPER_DATA_ID || $num === MesgNum::FIELD_DESCRIPTION) {
+                        $devMessages->addMessage($message);
+                    }
+                    $messageHandler($message);
+                    break;
 
                 case self::MESSAGE_TYPE_DEFINITION:
                     // definition message
@@ -123,6 +161,16 @@ class Decoder
                     }
 
                     $message = $this->nextRecordData($messageTypeDefinitions[$localMessagType], $reader, $devMessages);
+
+                    // Keep the reference timestamp current so compressed-timestamp headers
+                    // that follow can reconstruct their full timestamp correctly.
+                    $tsField = $message->getField(self::TIMESTAMP_FIELD_NUMBER);
+                    if ($tsField !== null) {
+                        $tsValue = $message->getFieldValue(self::TIMESTAMP_FIELD_NUMBER);
+                        if ($tsValue instanceof DateTime) {
+                            $this->lastTimestamp = $tsValue->getTimestamp() - 631065600;
+                        }
+                    }
 
                     $num = $message->getGlobalMessageNumber();
                     if ($num === MesgNum::DEVELOPER_DATA_ID || $num === MesgNum::FIELD_DESCRIPTION) {
@@ -252,6 +300,46 @@ class Decoder
                 ));
             }
         }
+    }
+
+    /**
+     * Like nextRecordData, but omits one field from the data stream.
+     * Used for compressed-timestamp records where the timestamp field is absent
+     * from the binary data and must be injected from the computed header value.
+     */
+    private function nextRecordDataSkippingField(array $definition, int $skipFieldNumber, IOReader $reader, MessageList $messages): Message
+    {
+        $message = MessageFactory::createMessage($definition['global_message_number']);
+        $bigEndian = $definition['byte_order'] === IOReader::BIG_ENDIAN_ORDER;
+
+        foreach ($definition['field_definitions'] as $fieldDefinition) {
+            if ($fieldDefinition['field_definition_number'] === $skipFieldNumber) {
+                continue;
+            }
+            $this->assignMessageValue(
+                $fieldDefinition['field_definition_number'],
+                $fieldDefinition['base_type'],
+                $fieldDefinition['size'],
+                $bigEndian,
+                $message,
+                $reader
+            );
+        }
+
+        foreach ($definition['developer_field_definitions'] as $devFieldDefinition) {
+            $field = $this->createDeveloperField($devFieldDefinition['data_index'], $devFieldDefinition['field_definition_number'], $messages, $message);
+            $message->addField($field);
+            $this->assignMessageValue(
+                $field->getNumber(),
+                $field->getType(),
+                $devFieldDefinition['size'],
+                $bigEndian,
+                $message,
+                $reader
+            );
+        }
+
+        return $message;
     }
 
     /**
