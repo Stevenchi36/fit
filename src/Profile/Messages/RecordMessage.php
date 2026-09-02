@@ -128,7 +128,7 @@ final class RecordMessage extends Message
     /**
      * Gets the position lat
      */
-    public function getPositionLat(): int|array|null
+    public function getPositionLat(): int|float|array|null
     {
         return $this->getFieldValue(0);
     }
@@ -136,7 +136,7 @@ final class RecordMessage extends Message
     /**
      * Gets the position long
      */
-    public function getPositionLong(): int|array|null
+    public function getPositionLong(): int|float|array|null
     {
         return $this->getFieldValue(1);
     }
