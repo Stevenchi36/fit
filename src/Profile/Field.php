@@ -21,6 +21,11 @@ use Sportlog\FIT\FitBaseType;
 final class Field
 {
     /**
+     * Reserved field definition number for the timestamp field.
+     * Defined in the FIT protocol spec; present in every message type that carries timing data.
+     */
+    public const TIMESTAMP_FIELD_NUMBER = 253;
+    /**
      * Default scale
      */
     public const DEFAULT_SCALE = 1.0;

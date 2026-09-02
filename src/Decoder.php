@@ -31,9 +31,6 @@ class Decoder
     const MESSAGE_TYPE_DEFINITION = 'definition';
     const MESSAGE_TYPE_COMPRESSED_TIMESTAMP = 'compressed_timestamp';
 
-    /** FIT field definition number for the timestamp field. */
-    private const TIMESTAMP_FIELD_NUMBER = 253;
-
     /**
      * Last seen FIT timestamp (seconds since FIT epoch 1989-12-31).
      * Updated by normal data messages and by each computed compressed timestamp.
@@ -136,11 +133,11 @@ class Decoder
 
                     $message = $this->nextRecordDataSkippingField(
                         $messageTypeDefinitions[$localMessagType],
-                        self::TIMESTAMP_FIELD_NUMBER,
+                        Field::TIMESTAMP_FIELD_NUMBER,
                         $reader,
                         $devMessages
                     );
-                    $message->setFieldValue(self::TIMESTAMP_FIELD_NUMBER, $ts);
+                    $message->setFieldValue(Field::TIMESTAMP_FIELD_NUMBER, $ts);
 
                     $num = $message->getGlobalMessageNumber();
                     if ($num === MesgNum::DEVELOPER_DATA_ID || $num === MesgNum::FIELD_DESCRIPTION) {
@@ -164,9 +161,9 @@ class Decoder
 
                     // Keep the reference timestamp current so compressed-timestamp headers
                     // that follow can reconstruct their full timestamp correctly.
-                    $tsField = $message->getField(self::TIMESTAMP_FIELD_NUMBER);
+                    $tsField = $message->getField(Field::TIMESTAMP_FIELD_NUMBER);
                     if ($tsField !== null) {
-                        $tsValue = $message->getFieldValue(self::TIMESTAMP_FIELD_NUMBER);
+                        $tsValue = $message->getFieldValue(Field::TIMESTAMP_FIELD_NUMBER);
                         if ($tsValue instanceof DateTime) {
                             $this->lastTimestamp = $tsValue->getTimestamp() - 631065600;
                         }
